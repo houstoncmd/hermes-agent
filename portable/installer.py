@@ -27,7 +27,8 @@ from datetime import datetime
 # ─── Constants ─────────────────────────────────────────────────────────────
 APP_NAME = 'Hermes Agent'
 APP_VERSION = '0.16.0'
-DEFAULT_INSTALL_DIR = Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local')) / 'hermes'
+# Default install to D:\hermes (as requested)
+DEFAULT_INSTALL_DIR = Path('D:/hermes')
 HERMES_HOME_NAME = 'hermes-home'
 DESKTOP_DIR = Path(os.environ.get('USERPROFILE', Path.home())) / 'Desktop'
 

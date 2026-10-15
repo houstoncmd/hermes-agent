@@ -13,10 +13,11 @@ Usage:
 
 Output:
     dist/
-    ├── hermes-portable-win64-v0.16.0.zip
-    │   ├── hermes.exe
-    │   ├── hermes-payload.zip
-    │   └── README.txt
+    └── hermes-portable-win64-v0.16.0-YYYYMMDD.zip
+        ├── hermes.exe          (Windows executable)
+        ├── hermes-payload.zip  (skills, plugins, wheels)
+        ├── install.bat         (One-click installer to D:\hermes)
+        └── README.txt
 """
 
 import os
@@ -66,12 +67,13 @@ def check_prerequisites():
     if sys.version_info < (3, 11):
         issues.append(f"Python 3.11+ required (found {sys.version})")
 
-    # Check if PyInstaller is available (for exe build)
-    try:
-        import PyInstaller
-        print_success(f"PyInstaller {PyInstaller.__version__} available")
-    except ImportError:
-        issues.append("PyInstaller not installed (pip install pyinstaller)")
+    # Check if PyInstaller is available (only needed for exe build on Windows)
+    if sys.platform == 'win32':
+        try:
+            import PyInstaller
+            print_success(f"PyInstaller {PyInstaller.__version__} available")
+        except ImportError:
+            issues.append("PyInstaller not installed (pip install pyinstaller)")
 
     # Check if we're on Windows (for Windows build)
     if sys.platform != 'win32':
@@ -91,7 +93,7 @@ def check_prerequisites():
 
 def download_wheels(include_messaging: bool = False):
     """Download Python package wheels."""
-    from build_payload import download_wheels, CORE_DEPS, MESSAGING_DEPS
+    from build_payload import download_wheels as _download, CORE_DEPS, MESSAGING_DEPS
 
     wheels_dir = PORTABLE_DIR / 'wheels'
     if wheels_dir.exists() and list(wheels_dir.glob('*.whl')):
@@ -102,7 +104,7 @@ def download_wheels(include_messaging: bool = False):
     if include_messaging:
         deps.extend(MESSAGING_DEPS)
 
-    download_wheels(deps, wheels_dir)
+    _download(deps, wheels_dir)
     return wheels_dir
 
 
@@ -141,9 +143,9 @@ def build_exe():
 
 def build_payload(include_messaging: bool = False):
     """Build the payload zip."""
-    from build_payload import build_payload as _build_payload
+    from build_payload import build_payload as _build
 
-    return _build_payload(
+    return _build(
         output_dir=DIST_DIR,
         include_messaging=include_messaging,
         download_wheels_flag=False,
@@ -164,62 +166,167 @@ def create_distributable():
     exe_path = DIST_DIR / 'hermes.exe'
     if exe_path.exists():
         files_to_include.append(('hermes.exe', exe_path))
+        print_success(f"  ✓ hermes.exe ({exe_path.stat().st_size / 1024 / 1024:.1f} MB)")
+    else:
+        print(f"  ⚠  hermes.exe not found (build on Windows to create it)")
 
     # Find payload zip
     payload_files = list(DIST_DIR.glob('hermes-payload-*.zip'))
     if payload_files:
         payload_path = sorted(payload_files)[-1]
         files_to_include.append(('hermes-payload.zip', payload_path))
+        print_success(f"  ✓ hermes-payload.zip ({payload_path.stat().st_size / 1024 / 1024:.1f} MB)")
 
-    # Create README
-    readme_content = f"""Hermes Agent Portable v{APP_VERSION}
-{'='*40}
+    # Create install.bat (one-click installer)
+    install_bat_content = f"""@echo off
+chcp 65001 >nul 2>&1
+title Hermes Agent v{APP_VERSION} Installer
 
-Installation:
-1. Extract this zip to a folder
-2. Run hermes-setup.exe (or hermes.exe on first run)
-3. Follow the installer prompts
+echo.
+echo ========================================
+echo   Hermes Agent v{APP_VERSION} - Installer
+echo ========================================
+echo.
+echo Install location: D:\\hermes
+echo.
 
-First Run:
-1. The installer will create a virtual environment
-2. Edit hermes-home/.env to add your API keys
-3. Run hermes.exe to start chatting
+REM Create D:\\hermes directory
+if not exist "D:\\hermes" (
+    echo [1/4] Creating D:\\hermes directory...
+    mkdir "D:\\hermes"
+) else (
+    echo [1/4] D:\\hermes directory already exists
+)
 
-Directory Structure:
-  hermes.exe          - Main application
-  hermes-payload.zip  - Supporting files (auto-extracted)
-  hermes-home/        - Configuration and data
-    config.yaml       - Settings
-    .env              - API keys
-    sessions/         - Chat sessions
-    skills/           - Installed skills
-    memories/         - Agent memory
+REM Copy hermes.exe
+echo [2/4] Copying hermes.exe...
+copy /Y "hermes.exe" "D:\\hermes\\hermes.exe" >nul 2>&1
 
-More Info: https://hermes-agent.nousresearch.com/docs
+REM Extract payload
+echo [3/4] Extracting payload to D:\\hermes...
+powershell -command "Expand-Archive -Path 'hermes-payload.zip' -DestinationPath 'D:\\hermes' -Force" >nul 2>&1
+
+REM Create desktop shortcut
+echo [4/4] Creating desktop shortcut...
+powershell -command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut([System.Environment]::GetFolderPath('Desktop') + '\\Hermes Agent.lnk'); $Shortcut.TargetPath = 'D:\\hermes\\hermes.exe'; $Shortcut.WorkingDirectory = 'D:\\hermes'; $Shortcut.Description = 'Hermes Agent - AI Assistant'; $Shortcut.Save()" >nul 2>&1
+
+echo.
+echo ========================================
+echo   Installation Complete!
+echo ========================================
+echo.
+echo Installed to: D:\\hermes
+echo Desktop shortcut: "Hermes Agent"
+echo.
+echo NEXT STEPS:
+echo   1. Edit D:\\hermes\\hermes-home\\.env
+echo      Add your API key (OPENROUTER_API_KEY=***)
+echo   2. Double-click "Hermes Agent" on Desktop
+echo      Or open CMD and run: D:\\hermes\\hermes.exe
+echo.
+pause
 """
+
+    install_bat_path = DIST_DIR / 'install.bat'
+    install_bat_path.write_text(install_bat_content, encoding='utf-8')
+    files_to_include.append(('install.bat', install_bat_path))
+    print_success("  ✓ install.bat")
+
+    # Create README.txt
+    readme_content = f"""╔══════════════════════════════════════════════════════╗
+║         Hermes Agent Portable v{APP_VERSION}            ║
+╚══════════════════════════════════════════════════════╝
+
+QUICK INSTALL:
+  1. Double-click install.bat
+  2. Done! Files installed to D:\\hermes
+
+MANUAL INSTALL:
+  1. Copy hermes.exe to D:\\hermes\\
+  2. Extract hermes-payload.zip to D:\\hermes\\
+
+AFTER INSTALL:
+  1. Edit D:\\hermes\\hermes-home\\.env
+     Add your API key:
+       OPENROUTER_API_KEY=***  or
+       ANTHROPIC_API_KEY=***  or
+       GOOGLE_API_KEY=***  or
+       DEEPSEEK_API_KEY=***
+
+  2. Start using:
+     - Double-click "Hermes Agent" on Desktop
+     - Or open CMD/PowerShell and run: D:\\hermes\\hermes.exe
+
+DIRECTORY STRUCTURE:
+  D:\\hermes\\
+  ├── hermes.exe              Main application (30 MB)
+  ├── skills\\                 Built-in skills
+  ├── optional-skills\\        Heavy/niche skills
+  ├── plugins\\                Plugin modules
+  ├── wheels\\                 Python packages (offline install)
+  ├── config.yaml.example     Configuration example
+  └── hermes-home\\            Your data (created on first run)
+      ├── config.yaml         Settings
+      ├── .env                API keys (EDIT THIS!)
+      ├── sessions\\           Chat history
+      ├── skills\\             Installed skills
+      └── memories\\           Agent memory
+
+COMMANDS (CMD / PowerShell):
+  D:\\hermes\\hermes.exe                Interactive chat
+  D:\\hermes\\hermes.exe chat -q "..."    Single query
+  D:\\hermes\\hermes.exe setup           Setup wizard
+  D:\\hermes\\hermes.exe model           Change model/provider
+  D:\\hermes\\hermes.exe gateway run     Start messaging gateway
+  D:\\hermes\\hermes.exe sessions list   List chat sessions
+  D:\\hermes\\hermes.exe cron list       List scheduled jobs
+  D:\\hermes\\hermes.exe doctor          Check installation
+
+REQUIREMENTS:
+  - Windows 10/11 (64-bit)
+  - Python 3.11+ (https://python.org/downloads/)
+  - Internet connection (for API calls)
+
+TROUBLESHOOTING:
+  - "Python not found": Install Python 3.11+ and check "Add to PATH"
+  - "API key not set": Edit D:\\hermes\\hermes-home\\.env
+  - More help: https://hermes-agent.nousresearch.com/docs
+
+UNINSTALL:
+  Delete D:\\hermes\\ and the desktop shortcut.
+"""
+
     readme_path = DIST_DIR / 'README.txt'
     readme_path.write_text(readme_content, encoding='utf-8')
     files_to_include.append(('README.txt', readme_path))
+    print_success("  ✓ README.txt")
 
-    # Create zip
+    # Create the zip
     import zipfile
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
         for arcname, filepath in files_to_include:
             zf.write(filepath, arcname)
 
     size_mb = zip_path.stat().st_size / 1024 / 1024
-    print_success(f"Created: {zip_path} ({size_mb:.1f} MB)")
+    print_step(f"Distributable created: {zip_path}")
+    print_success(f"Total size: {size_mb:.1f} MB")
 
     return zip_path
 
 
 def cleanup():
     """Clean up temporary build files."""
-    print_step("Cleaning up...")
-    build_dirs = [REPO_ROOT / 'build', REPO_ROOT / '*.spec']
-    for d in build_dirs:
-        if d.exists():
-            shutil.rmtree(d)
+    print_step("Cleaning up build artifacts...")
+    build_dir = REPO_ROOT / 'build'
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+    # Remove spec from build
+    for spec_file in (DIST_DIR / '*.spec', REPO_ROOT / '*.spec'):
+        for f in [spec_file] if isinstance(spec_file, Path) else list(Path(REPO_ROOT).glob('*.spec')):
+            if f.exists() and f.name == 'hermes.spec':
+                pass  # Keep our spec
+            elif f.exists():
+                f.unlink()
     print_success("Cleanup complete")
 
 
@@ -235,10 +342,11 @@ def main():
                         help='Skip cleanup after build')
     args = parser.parse_args()
 
-    print_header(f"Hermes Agent vAPP_VERSION — Portable Build")
+    print_header(f"Hermes Agent v{APP_VERSION} — Portable Build")
 
     # Check prerequisites
     if not check_prerequisites():
+        print_error("Cannot continue without prerequisites")
         sys.exit(1)
 
     # Ensure dist directory exists
@@ -247,13 +355,14 @@ def main():
     # Download wheels
     wheels_dir = download_wheels(args.include_messaging)
 
-    # Build exe
+    # Build exe (Windows only)
     if not args.skip_exe:
         if sys.platform == 'win32':
             build_exe()
         else:
-            print("\n  ⚠  Skipping exe build (not on Windows)")
-            print("     Run this script on Windows to build the exe")
+            print_step("Skipping exe build (not on Windows)")
+            print("  To build the exe, run this script on Windows")
+            print("  Payload will still be built...")
 
     # Build payload
     if not args.skip_payload:
@@ -269,17 +378,20 @@ def main():
     # Final summary
     print_header("Build Complete! 🎉")
     print(f"""
-  Output: {zip_path}
+  📦 Output: {zip_path}
 
-  Files included:
-    - hermes.exe (Windows executable)
-    - hermes-payload.zip (skills, plugins, wheels)
-    - README.txt (installation guide)
+  Contents:
+    ├── hermes.exe          (if built on Windows)
+    ├── hermes-payload.zip  (skills + plugins + wheels)
+    ├── install.bat         (one-click install to D:\\hermes)
+    └── README.txt          (instructions)
 
-  To distribute:
-    1. Share the zip file
-    2. User extracts and runs hermes.exe
-    3. Installer handles the rest
+  To use on Windows:
+    1. Copy zip to Windows machine
+    2. Extract to any folder
+    3. Double-click install.bat
+    4. Edit D:\\hermes\\hermes-home\\.env (add API key)
+    5. Double-click "Hermes Agent" on Desktop
 """)
 
 
