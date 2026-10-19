@@ -4,7 +4,6 @@ Hermes Agent Portable — GUI App Shell (PyInstaller entry point)
 
 Modes:
     (no args, double-click)  → GUI mode: first-run installer + tray + webview UI
-    __backend__ [port]       → internal: run dashboard server (hidden window)
     <any CLI args>           → passthrough to hermes CLI (chat, setup, ...)
 
 Flow (GUI mode):
@@ -14,11 +13,11 @@ Flow (GUI mode):
        - create desktop shortcut
        - write .installed marker
     2. Every run:
-       - spawn/attach dashboard backend (hidden subprocess)
+       - self-host the dashboard server IN-PROCESS (daemon thread, no subprocess)
        - open pywebview window → http://127.0.0.1:<port>
        - tray icon: left-click / menu → show window
        - minimize → hide window (tray keeps running)
-       - close (X) → confirm dialog: type "shutdown" → kill backend + exit
+       - close (X) → confirm dialog: type "shutdown" → exit (daemon thread dies with process)
 
 Install dir resolution:
     D:\\hermes  (if D: exists)  else  %LOCALAPPDATA%\\Hermes
@@ -155,115 +154,92 @@ def port_responds(port: int) -> bool:
         return False
 
 
-def pid_alive(pid: int) -> bool:
-    try:
-        import psutil
-        return psutil.pid_exists(pid) and not psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
-    except Exception:
-        if os.name == 'nt':
-            r = subprocess.run(['tasklist', '/FI', f'PID eq {pid}'],
-                               capture_output=True, text=True)
-            return str(pid) in r.stdout
-        try:
-            os.kill(pid, 0)
-            return True
-        except OSError:
-            return False
+def start_selfhost_server(port: int) -> None:
+    """Run the hermes dashboard server IN-PROCESS on a daemon thread.
+
+    Self-hosting replaces the old "spawn a hidden subprocess and wait for the
+    port" approach: the shell exe itself hosts the dashboard. Benefits: no port
+    race between probe and bind, no stale backend.pid, no CREATE_NO_WINDOW
+    quirks, and shutdown is just os._exit(0) (daemon threads die with the
+    process). uvicorn's capture_signals() is a no-op off the main thread, so
+    serving from a worker thread is safe.
+    """
+    home = hermes_home()
+    os.environ['HERMES_HOME'] = str(home)
+    # ALWAYS set HERMES_WEB_DIST — without it cmd_dashboard tries to rebuild
+    # the SPA with npm, which does not exist on a portable install.
+    web_dist = install_dir() / 'hermes_cli' / 'web_dist'
+    if not web_dist.is_dir():
+        web_dist = resource_path('hermes_cli') / 'web_dist'
+    os.environ['HERMES_WEB_DIST'] = str(web_dist)
+
+    import argparse
+
+    from hermes_cli.main import cmd_dashboard
+
+    args = argparse.Namespace(
+        host='127.0.0.1',
+        port=port,
+        no_open=True,           # we open our own webview window
+        status=False,
+        stop=False,
+        headless_backend=False,
+        ssh_session_token_file=None,
+        ssh_owner_nonce=None,
+        insecure=False,
+        open_profile='',
+        skip_build=False,
+    )
+    cmd_dashboard(args)
 
 
-def read_pidfile() -> int:
-    try:
-        return int((install_dir() / 'backend.pid').read_text().strip())
-    except Exception:
-        return 0
+# In-process dashboard server state (self-hosting).
+_SERVER_ERROR: dict = {}
+_SERVER_THREAD: dict = {'thread': None}
 
 
-def write_pidfile(pid: int) -> None:
-    try:
-        (install_dir() / 'backend.pid').write_text(str(pid))
-    except Exception:
-        pass
+# ─── First-run installer ───────────────────────────────────────────────────
 
 
-def spawn_backend(port: int):
-    """Start the dashboard server as a hidden subprocess of this exe."""
-    log_dir = install_dir() / 'logs'
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_handle = open(log_file(), 'a', encoding='utf-8', errors='replace')
-    log_handle.write(f"\n--- backend start {datetime.now().isoformat()} port={port} ---\n")
-    log_handle.flush()
+def ensure_selfhost() -> int:
+    """Start the in-process dashboard server (self-hosting). Returns the port.
 
-    if os.name == 'nt':
-        proc = subprocess.Popen(
-            [sys.executable, '__backend__', str(port)],
-            cwd=str(install_dir()),
-            stdout=log_handle,
-            stderr=log_handle,
-            stdin=subprocess.DEVNULL,
-            creationflags=CREATE_NO_WINDOW,
-        )
-    else:
-        proc = subprocess.Popen(
-            [sys.executable, '__backend__', str(port)],
-            cwd=str(install_dir()),
-            stdout=log_handle,
-            stderr=log_handle,
-            stdin=subprocess.DEVNULL,
-        )
-    write_pidfile(proc.pid)
-    return proc
-
-
-def kill_backend_tree(pid: int) -> None:
-    if not pid:
-        return
-    try:
-        if os.name == 'nt':
-            subprocess.run(['taskkill', '/T', '/F', '/PID', str(pid)],
-                           capture_output=True, timeout=15)
-        else:
-            import psutil
-            parent = psutil.Process(pid)
-            for child in parent.children(recursive=True):
-                try:
-                    child.terminate()
-                except Exception:
-                    pass
-            parent.terminate()
-            parent.wait(timeout=5)
-    except Exception:
-        pass
-
-
-def ensure_backend() -> int:
-    """Attach to a running backend or spawn a new one. Returns the port."""
-    pid = read_pidfile()
-    if pid and pid_alive(pid):
-        # pidfile points at our own shell process from a previous run
-        # (the shell exits on shutdown, so a live pidfile pid = orphan backend)
-        pass
-
-    # Already serving? (started by another instance)
+    Unlike the old spawn_backend() this does NOT exec a subprocess: the server
+    runs on a daemon thread inside THIS process. Faster, no port race, no
+    stale pidfile — and shutdown is a plain os._exit(0).
+    """
+    # Already serving? (another shell instance already bound the port)
     for port in _port_candidates():
         if port_responds(port):
             return port
 
     port = find_free_port()
-    spawn_backend(port)
+
+    def _run():
+        try:
+            start_selfhost_server(port)
+        except BaseException as exc:  # noqa: BLE001 — surface to GUI thread
+            _SERVER_ERROR['exc'] = exc
+
+    t = threading.Thread(target=_run, name='hermes-dashboard', daemon=True)
+    _SERVER_THREAD['thread'] = t
+    t.start()
 
     deadline = time.time() + BACKEND_READY_TIMEOUT
     while time.time() < deadline:
+        if 'exc' in _SERVER_ERROR:
+            raise RuntimeError(
+                f'Dashboard server failed to start: {_SERVER_ERROR["exc"]}'
+            ) from _SERVER_ERROR['exc']
         if port_responds(port):
             return port
         time.sleep(0.5)
 
     raise RuntimeError(
-        f'Backend did not become ready within {BACKEND_READY_TIMEOUT}s — '
+        f'Dashboard did not become ready within {BACKEND_READY_TIMEOUT}s — '
         f'check {log_file()}'
     )
 
-
-# ─── First-run installer ───────────────────────────────────────────────────
 
 def find_payload_zip() -> Path | None:
     """Payload next to the original exe, or bundled inside the exe."""
@@ -389,30 +365,6 @@ def run_first_install(progress) -> Path:
     return exe_path
 
 
-# ─── Backend mode (hidden subprocess) ──────────────────────────────────────
-
-def run_backend() -> None:
-    port = int(sys.argv[2]) if len(sys.argv) > 2 else BASE_PORT
-    home = hermes_home()
-    os.environ['HERMES_HOME'] = str(home)
-    # Prefer install-dir web dashboard assets (editable) over the bundled
-    # copy. ALWAYS set HERMES_WEB_DIST — without it the dashboard command
-    # tries to rebuild the SPA with npm, which does not exist on portable.
-    web_dist = install_dir() / 'hermes_cli' / 'web_dist'
-    if not web_dist.is_dir():
-        web_dist = resource_path('hermes_cli') / 'web_dist'
-    os.environ['HERMES_WEB_DIST'] = str(web_dist)
-
-    sys.argv = [
-        'hermes', 'dashboard',
-        '--no-open',
-        '--host', '127.0.0.1',
-        '--port', str(port),
-    ]
-    from hermes_cli.main import main as cli_main
-    cli_main()
-
-
 # ─── GUI mode ──────────────────────────────────────────────────────────────
 
 TRAY_ICON_SPEC = {
@@ -524,7 +476,6 @@ class ShellState:
         self.window = None        # main pywebview window
         self.dialog = None        # shutdown confirm dialog
         self.tray = None
-        self.backend_proc = None
         self.port = 0
         self.shutting_down = False
         self.installing = False
@@ -565,11 +516,8 @@ def do_shutdown() -> None:
     if STATE.shutting_down:
         return
     STATE.shutting_down = True
-    kill_backend_tree(STATE.backend_proc.pid if STATE.backend_proc else read_pidfile())
-    try:
-        (install_dir() / 'backend.pid').unlink(missing_ok=True)
-    except Exception:
-        pass
+    # Self-hosted: the dashboard server runs on a daemon thread inside THIS
+    # process, so no subprocess to kill — os._exit(0) tears everything down.
     if STATE.tray is not None:
         try:
             STATE.tray.stop()
@@ -624,11 +572,11 @@ def start_tray() -> None:
 
 
 def _install_and_start_backend(progress) -> int:
-    """Shared first-run install + backend start. Returns the port."""
+    """Shared first-run install + self-hosted server start. Returns the port."""
     if STATE.installing:
         run_first_install(progress)
-    progress('กำลังเชื่อมต่อ gateway ...')
-    return ensure_backend()
+    progress('กำลังเริ่มต้น dashboard ...')
+    return ensure_selfhost()
 
 
 def _browser_fallback(exc: Exception) -> None:
@@ -641,7 +589,7 @@ def _browser_fallback(exc: Exception) -> None:
     try:
         if STATE.installing:
             run_first_install(lambda m: None)
-        STATE.port = ensure_backend()
+        STATE.port = ensure_selfhost()
         start_tray()
         webbrowser.open(dashboard_url(STATE.port))
         # Keep the process alive so the tray + backend stay up.
@@ -748,9 +696,6 @@ def cli_passthrough() -> None:
 
 def main() -> None:
     if len(sys.argv) > 1:
-        if sys.argv[1] == '__backend__':
-            run_backend()
-            return
         cli_passthrough()
         return
     run_gui()
