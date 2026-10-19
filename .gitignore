@@ -217,3 +217,8 @@ native/fts5_cjk/*.so
 portable/wheels/
 dist/
 build/
+
+# Build artifacts (downloaded from CI, never commit)
+newbuild/
+out/
+dist/

@@ -241,7 +241,11 @@ for _pkg in ('webview', 'pystray', 'pythonnet', 'clr_loader',
 # ─── Analysis ──────────────────────────────────────────────────────────────
 a = Analysis(
     [str(REPO_ROOT / 'portable' / 'app_shell.py')],
-    pathex=[str(REPO_ROOT)],
+    # portable/ must be on pathex so `import qt_window` (app_shell's Qt backend,
+    # which lives NEXT to app_shell.py in portable/) resolves at build time —
+    # otherwise PyInstaller silently omits it and the exe always falls back to
+    # pywebview/browser with no Qt window.
+    pathex=[str(REPO_ROOT), str(REPO_ROOT / 'portable')],
     binaries=_gui_binaries,
     datas=datas,
     hiddenimports=hidden_imports,
