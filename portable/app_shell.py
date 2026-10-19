@@ -601,63 +601,101 @@ def start_tray() -> None:
     STATE.tray.run_detached()
 
 
-def run_gui() -> None:
-    import webview
+def _install_and_start_backend(progress) -> int:
+    """Shared first-run install + backend start. Returns the port."""
+    if STATE.installing:
+        run_first_install(progress)
+    progress('กำลังเชื่อมต่อ gateway ...')
+    return ensure_backend()
 
+
+def _browser_fallback(exc: Exception) -> None:
+    """pywebview failed (pythonnet/.NET backend is fragile in frozen apps).
+    Fall back to opening the dashboard in the default browser so the app is
+    still fully usable — tray + shutdown still work."""
+    import webbrowser
+
+    print(f'[hermes] native window failed ({exc}); falling back to browser')
+    try:
+        if STATE.installing:
+            run_first_install(lambda m: None)
+        STATE.port = ensure_backend()
+        start_tray()
+        webbrowser.open(f'http://127.0.0.1:{STATE.port}')
+        # Keep the process alive so the tray + backend stay up.
+        while True:
+            time.sleep(3600)
+    except Exception as fatal:
+        # Even the browser path failed — surface it.
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                f'Hermes ไม่สามารถเริ่มได้:\\n\\n{fatal}\\n\\n'
+                f'ดู log: {log_file()}',
+                'Hermes Agent',
+                0x10,
+            )
+        except Exception:
+            pass
+        raise
+
+
+def run_gui() -> None:
     STATE.installing = not is_installed()
 
-    # Loading / installer window (also used as the main window shell)
-    STATE.window = webview.create_window(
-        APP_NAME,
-        html=LOADING_HTML,
-        width=1180, height=760,
-        min_size=(720, 480),
-        background_color='#12121a',
-    )
-    STATE.dialog = webview.create_window(
-        'ยืนยันการปิด',
-        html=SHUTDOWN_DIALOG_HTML,
-        width=430, height=290,
-        resizable=False,
-        frameless=False,
-        js_api=ShellApi(),
-        hidden=True,
-        on_top=True,
-        background_color='#1a1a24',
-    )
-
-    STATE.window.events.closing += on_window_closing
     try:
-        STATE.window.events.minimized += on_window_minimized
-    except AttributeError:
-        pass  # older pywebview: minimize-to-tray unavailable, harmless
+        import webview
 
-    def bootstrap():
-        """Runs on a worker thread once the GUI is up."""
+        # Loading / installer window (also used as the main window shell)
+        STATE.window = webview.create_window(
+            APP_NAME,
+            html=LOADING_HTML,
+            width=1180, height=760,
+            min_size=(720, 480),
+            background_color='#12121a',
+        )
+        STATE.dialog = webview.create_window(
+            'ยืนยันการปิด',
+            html=SHUTDOWN_DIALOG_HTML,
+            width=430, height=290,
+            resizable=False,
+            frameless=False,
+            js_api=ShellApi(),
+            hidden=True,
+            on_top=True,
+            background_color='#1a1a24',
+        )
+
+        STATE.window.events.closing += on_window_closing
         try:
-            if STATE.installing:
-                exe_path = run_first_install(gui_progress)
-            else:
-                exe_path = install_dir() / engine_exe_name()
+            STATE.window.events.minimized += on_window_minimized
+        except AttributeError:
+            pass  # older pywebview: minimize-to-tray unavailable, harmless
 
-            gui_progress('กำลังเชื่อมต่อ gateway ...')
-            STATE.port = ensure_backend()
-
-            gui_progress('กำลังเปิด dashboard ...')
-            STATE.window.load_url(f'http://127.0.0.1:{STATE.port}')
-
-            start_tray()
-        except Exception as exc:
+        def bootstrap():
+            """Runs on a worker thread once the GUI is up."""
             try:
-                STATE.window.load_html(
-                    f'<body style="background:#12121a;color:#e8e8f0;'
-                    f'font-family:sans-serif;display:flex;align-items:center;'
-                    f'justify-content:center;height:100vh"><div>'
-                    f'<h2>เกิดข้อผิดพลาด</h2><pre>{exc}</pre></div></body>')
-            except Exception:
-                pass
+                STATE.port = _install_and_start_backend(gui_progress)
+                gui_progress('กำลังเปิด dashboard ...')
+                STATE.window.load_url(f'http://127.0.0.1:{STATE.port}')
+                start_tray()
+            except Exception as exc:
+                try:
+                    STATE.window.load_html(
+                        f'<body style="background:#12121a;color:#e8e8f0;'
+                        f'font-family:sans-serif;display:flex;align-items:center;'
+                        f'justify-content:center;height:100vh"><div>'
+                        f'<h2>เกิดข้อผิดพลาด</h2><pre>{exc}</pre></div></body>')
+                except Exception:
+                    pass
 
-    webview.start(func=bootstrap)
+        webview.start(func=bootstrap)
+    except Exception as exc:
+        # pywebview import/start failed (e.g. pythonnet/.NET backend not
+        # loadable in the frozen app). Degrade to a browser window so the
+        # app still works end-to-end.
+        _browser_fallback(exc)
 
 
 # ─── Entry ─────────────────────────────────────────────────────────────────

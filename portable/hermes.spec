@@ -211,7 +211,12 @@ if wheels_dir.exists():
 from PyInstaller.utils.hooks import collect_all as _collect_all
 
 _gui_binaries = []
-for _pkg in ('webview', 'pystray'):
+# pythonnet + clr_loader: pywebview's Windows backends import clr → pythonnet
+# → clr_loader, which loads Python.Runtime.dll at runtime. PyInstaller misses
+# their runtime DLLs/data without collect_all ("Failed to resolve
+# Python.Runtime.Loader.Initialize"). Best-effort; app also has a browser
+# fallback if the native window still fails.
+for _pkg in ('webview', 'pystray', 'pythonnet', 'clr_loader'):
     try:
         _c_datas, _c_binaries, _c_hidden = _collect_all(_pkg)
         datas += _c_datas
