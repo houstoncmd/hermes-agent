@@ -177,123 +177,65 @@ def create_distributable():
         files_to_include.append(('hermes-payload.zip', payload_path))
         print_success(f"  ✓ hermes-payload.zip ({payload_path.stat().st_size / 1024 / 1024:.1f} MB)")
 
-    # Create install.bat (one-click installer)
-    install_bat_content = f"""@echo off
-chcp 65001 >nul 2>&1
-title Hermes Agent v{APP_VERSION} Installer
-
-echo.
-echo ========================================
-echo   Hermes Agent v{APP_VERSION} - Installer
-echo ========================================
-echo.
-echo Install location: D:\\hermes
-echo.
-
-REM Create D:\\hermes directory
-if not exist "D:\\hermes" (
-    echo [1/4] Creating D:\\hermes directory...
-    mkdir "D:\\hermes"
-) else (
-    echo [1/4] D:\\hermes directory already exists
-)
-
-REM Copy hermes.exe
-echo [2/4] Copying hermes.exe...
-copy /Y "hermes.exe" "D:\\hermes\\hermes.exe" >nul 2>&1
-
-REM Extract payload
-echo [3/4] Extracting payload to D:\\hermes...
-powershell -command "Expand-Archive -Path 'hermes-payload.zip' -DestinationPath 'D:\\hermes' -Force" >nul 2>&1
-
-REM Create desktop shortcut
-echo [4/4] Creating desktop shortcut...
-powershell -command "$WshShell = New-Object -ComObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut([System.Environment]::GetFolderPath('Desktop') + '\\Hermes Agent.lnk'); $Shortcut.TargetPath = 'D:\\hermes\\hermes.exe'; $Shortcut.WorkingDirectory = 'D:\\hermes'; $Shortcut.Description = 'Hermes Agent - AI Assistant'; $Shortcut.Save()" >nul 2>&1
-
-echo.
-echo ========================================
-echo   Installation Complete!
-echo ========================================
-echo.
-echo Installed to: D:\\hermes
-echo Desktop shortcut: "Hermes Agent"
-echo.
-echo NEXT STEPS:
-echo   1. Edit D:\\hermes\\hermes-home\\.env
-echo      Add your API key (OPENROUTER_API_KEY=***)
-echo   2. Double-click "Hermes Agent" on Desktop
-echo      Or open CMD and run: D:\\hermes\\hermes.exe
-echo.
-pause
-"""
-
-    install_bat_path = DIST_DIR / 'install.bat'
-    install_bat_path.write_text(install_bat_content, encoding='utf-8')
-    files_to_include.append(('install.bat', install_bat_path))
-    print_success("  ✓ install.bat")
+    # NOTE: install.bat is retired. The exe is now self-installing —
+    # first double-click extracts payload, copies the engine, creates the
+    # desktop shortcut, and writes the marker. See app_shell.py.
 
     # Create README.txt
     readme_content = f"""╔══════════════════════════════════════════════════════╗
 ║         Hermes Agent Portable v{APP_VERSION}            ║
 ╚══════════════════════════════════════════════════════╝
 
-QUICK INSTALL:
-  1. Double-click install.bat
-  2. Done! Files installed to D:\\hermes
+HOW TO INSTALL (just ONE double-click):
+  1. Keep hermes.exe next to hermes-payload.zip (same folder).
+  2. Double-click hermes.exe  (first run = it installs itself):
+       - extracts payload + copies engine to D:\\\\hermes (or %LOCALAPPDATA%\\\\Hermes)
+       - creates a "Hermes Agent" shortcut on your Desktop
+       - starts the gateway + opens the UI automatically
+  3. Done. Later runs: double-click the Desktop icon → straight to the UI.
 
-MANUAL INSTALL:
-  1. Copy hermes.exe to D:\\hermes\\
-  2. Extract hermes-payload.zip to D:\\hermes\\
+HOW IT RUNS:
+  - The gateway runs hidden in the background; its icon sits in the
+    system tray (taskbar corner).
+  - Tray:  left-click / "เปิด UI"  → show the window
+          minimize  → window hides back to the tray
+          "ปิด Hermes Gateway ..." → asks for confirmation
+  - Closing the window (X) pops a dialog. Type  shutdown  to actually
+    stop the gateway; anything else cancels and keeps it running.
 
-AFTER INSTALL:
-  1. Edit D:\\hermes\\hermes-home\\.env
-     Add your API key:
-       OPENROUTER_API_KEY=***  or
-       ANTHROPIC_API_KEY=***  or
-       GOOGLE_API_KEY=***  or
-       DEEPSEEK_API_KEY=***
-
-  2. Start using:
-     - Double-click "Hermes Agent" on Desktop
-     - Or open CMD/PowerShell and run: D:\\hermes\\hermes.exe
+FIRST-TIME SETUP:
+  Edit D:\\\\hermes\\\\hermes-home\\\\.env (or %LOCALAPPDATA%\\\\Hermes\\\\hermes-home\\\\.env)
+  and add ONE API key, e.g.:
+       OPENROUTER_API_KEY=***     (or ANTHROPIC/GOOGLE/DEEPSEEK)
 
 DIRECTORY STRUCTURE:
-  D:\\hermes\\
-  ├── hermes.exe              Main application (30 MB)
-  ├── skills\\                 Built-in skills
-  ├── optional-skills\\        Heavy/niche skills
-  ├── plugins\\                Plugin modules
-  ├── wheels\\                 Python packages (offline install)
-  ├── config.yaml.example     Configuration example
-  └── hermes-home\\            Your data (created on first run)
-      ├── config.yaml         Settings
-      ├── .env                API keys (EDIT THIS!)
-      ├── sessions\\           Chat history
-      ├── skills\\             Installed skills
-      └── memories\\           Agent memory
+  D:\\\\hermes\\\\
+  ├── hermes.exe              The app (double-click to run)
+  ├── skills\\\\  optional-skills\\\\  plugins\\\\   bundled capabilities
+  ├── hermes-cli\\\\             engine files
+  ├── logs\\\\backend-console.log  gateway log
+  └── hermes-home\\\\            Your data
+      ├── config.yaml  .env    settings + API keys
+      ├── sessions\\\\           chat history
+      └── memories\\\\           agent memory
 
-COMMANDS (CMD / PowerShell):
-  D:\\hermes\\hermes.exe                Interactive chat
-  D:\\hermes\\hermes.exe chat -q "..."    Single query
-  D:\\hermes\\hermes.exe setup           Setup wizard
-  D:\\hermes\\hermes.exe model           Change model/provider
-  D:\\hermes\\hermes.exe gateway run     Start messaging gateway
-  D:\\hermes\\hermes.exe sessions list   List chat sessions
-  D:\\hermes\\hermes.exe cron list       List scheduled jobs
-  D:\\hermes\\hermes.exe doctor          Check installation
+CLI (optional, from CMD/PowerShell):
+  D:\\\\hermes\\\\hermes.exe chat -q "..."    single query
+  D:\\\\hermes\\\\hermes.exe setup           setup wizard
+  D:\\\\hermes\\\\hermes.exe doctor          check installation
 
 REQUIREMENTS:
-  - Windows 10/11 (64-bit)
-  - Python 3.11+ (https://python.org/downloads/)
+  - Windows 10/11 (64-bit) — no Python install needed
   - Internet connection (for API calls)
 
 TROUBLESHOOTING:
-  - "Python not found": Install Python 3.11+ and check "Add to PATH"
-  - "API key not set": Edit D:\\hermes\\hermes-home\\.env
-  - More help: https://hermes-agent.nousresearch.com/docs
+  - No UI / blank window: install Microsoft Edge WebView2 Runtime
+  - "API key not set": edit the .env in hermes-home, then restart from tray
+  - Log: D:\\\\hermes\\\\logs\\\\backend-console.log
+  - Docs: https://hermes-agent.nousresearch.com/docs
 
 UNINSTALL:
-  Delete D:\\hermes\\ and the desktop shortcut.
+  Delete D:\\\\hermes\\\\ and the Desktop shortcut.
 """
 
     readme_path = DIST_DIR / 'README.txt'
@@ -383,15 +325,17 @@ def main():
   Contents:
     ├── hermes.exe          (if built on Windows)
     ├── hermes-payload.zip  (skills + plugins + wheels)
-    ├── install.bat         (one-click install to D:\\hermes)
     └── README.txt          (instructions)
 
   To use on Windows:
     1. Copy zip to Windows machine
     2. Extract to any folder
-    3. Double-click install.bat
-    4. Edit D:\\hermes\\hermes-home\\.env (add API key)
-    5. Double-click "Hermes Agent" on Desktop
+    3. Double-click hermes.exe  (first run installs itself + opens UI)
+    4. Edit D:\\\\hermes\\\\hermes-home\\\\.env (add API key) — one time
+    5. Later runs: double-click "Hermes Agent" on Desktop → straight to UI
+
+  GUI shell: tray icon + webview window + typed-shutdown confirm.
+  See portable/app_shell.py for the flow.
 """)
 
 

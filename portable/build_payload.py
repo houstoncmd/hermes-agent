@@ -58,6 +58,9 @@ CORE_DEPS = [
     'fastapi>=0.104.0,<1',
     'uvicorn[standard]>=0.24.0,<1',
     'Pillow==12.2.0',
+    # GUI shell deps (tray + webview window for the portable exe)
+    'pywebview==5.3.2',
+    'pystray==0.19.5',
 ]
 
 # Messaging deps (optional, for gateway mode)

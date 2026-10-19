@@ -1,13 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
 Hermes Agent Portable Build — PyInstaller Spec File
-Build the core engine as a single-file .exe for Windows.
+Build the GUI app shell (tray + webview + first-run installer) as a
+single-file windowed .exe for Windows.
 
 Usage (on Windows):
     pip install pyinstaller
     pyinstaller hermes.spec
 
-Output: dist/hermes.exe (~30-35 MB)
+Output: dist/hermes.exe (~80-100 MB with GUI deps)
 """
 
 import os
@@ -136,6 +137,12 @@ core_hidden = [
     'fastapi',
     'uvicorn',
     'starlette',
+    # GUI shell deps (tray + webview window)
+    'pywebview',
+    'webview',
+    'pystray',
+    'pystray._win32',
+    'PIL',
     # SQLite (used by hermes_state)
     'sqlite3',
     # Windows-specific
@@ -194,7 +201,7 @@ if wheels_dir.exists():
 
 # ─── Analysis ──────────────────────────────────────────────────────────────
 a = Analysis(
-    [str(REPO_ROOT / 'hermes_cli' / 'main.py')],
+    [str(REPO_ROOT / 'portable' / 'app_shell.py')],
     pathex=[str(REPO_ROOT)],
     binaries=[],
     datas=datas,
@@ -224,14 +231,25 @@ a = Analysis(
         'turtledemo',
         'test',
         'tests',
-        # Exclude async frameworks we don't use
-        'asyncio',
-        'trio',
-        'anyio',
+        # NOTE: do NOT exclude asyncio/anyio/trio — uvicorn + starlette
+        # (dashboard server) require them at runtime.
     ],
     noarchive=False,
     optimize=1,  # -O1 for smaller size
 )
+
+# pywebview + pystray ship data/submodules PyInstaller cannot follow —
+# collect after Analysis so a.pure / a.binaries exist.
+from PyInstaller.utils.hooks import collect_all as _collect_all
+
+for _pkg in ('pywebview', 'webview', 'pystray'):
+    try:
+        _m, _p, _b = _collect_all(_pkg)
+        a.pure += _m
+        a.binaries += _b
+        datas += _p
+    except Exception:
+        pass
 
 # ─── PYZ (compressed Python archive) ──────────────────────────────────────
 pyz = PYZ(a.pure, a.zipped_data)
@@ -248,9 +266,10 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=True,         # Strip debug symbols
     upx=True,           # Compress with UPX if available
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=True,       # CLI application
+    upx_exclude=[
+        'vcruntime140.dll', 'python311.dll',   # UPX breaks these
+    ],
+    console=False,      # GUI app (windowed); CLI re-attaches parent console
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
