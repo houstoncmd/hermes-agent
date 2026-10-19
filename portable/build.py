@@ -28,6 +28,22 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 
+
+def _force_utf8_stdio():
+    """Windows consoles default to cp1252/cp874 and raise UnicodeEncodeError
+    on the ▸ ✓ ✗ glyphs used in our step output. Reconfigure stdio to UTF-8
+    (errors='replace') so the build is safe on a stock Windows runner/shell."""
+    for stream_name in ('stdout', 'stderr'):
+        stream = getattr(sys, stream_name, None)
+        try:
+            if stream is not None and hasattr(stream, 'reconfigure'):
+                stream.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            pass
+
+
+_force_utf8_stdio()
+
 # ─── Configuration ─────────────────────────────────────────────────────────
 REPO_ROOT = Path(__file__).parent.parent.resolve()
 PORTABLE_DIR = REPO_ROOT / 'portable'
@@ -340,4 +356,5 @@ def main():
 
 
 if __name__ == '__main__':
+    _force_utf8_stdio()
     main()

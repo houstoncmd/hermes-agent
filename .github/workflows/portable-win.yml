@@ -77,6 +77,11 @@ jobs:
 
       - name: Run portable build
         shell: pwsh
+        env:
+          # Windows runners default to a non-UTF-8 codepage (cp1252/cp874);
+          # build.py prints ▸ ✓ ✗ glyphs that raise UnicodeEncodeError there.
+          # build.py also reconfigures stdio itself — this is a second layer.
+          PYTHONIOENCODING: utf-8
         run: python portable/build.py --no-cleanup
 
       - name: Collect dist output
