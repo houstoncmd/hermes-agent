@@ -273,10 +273,12 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=True,         # Strip debug symbols
-    upx=True,           # Compress with UPX if available
-    upx_exclude=[
-        'vcruntime140.dll', 'python311.dll',   # UPX breaks these
-    ],
+    # DO NOT enable UPX: it corrupts the OpenSSL DLLs (_ssl.pyd,
+    # libssl-*.dll, libcrypto-*.dll) that pywebview's http module pulls in
+    # via `import ssl`, causing "DLL load failed while importing _ssl:
+    # Invalid access to memory location" at first double-click. Reliability
+    # over a ~10-20% size win — the exe is a few MB bigger but actually runs.
+    upx=False,
     console=False,      # GUI app (windowed); CLI re-attaches parent console
     disable_windowed_traceback=False,
     argv_emulation=False,
