@@ -42,7 +42,10 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
-          node-version: '20'
+          # .npmrc sets engine-strict=true and root package.json requires
+          # node >=22.22.0 — an older node makes every `npm ci`/`npm install`
+          # fail with EBADENGINE (no deps installed → `tsc` not found).
+          node-version: '22'
           cache: npm
 
       - name: Install Python deps (engine + build + GUI shell)
