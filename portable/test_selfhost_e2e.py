@@ -14,6 +14,13 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
+# Prepend the REPO ROOT (not just portable/) so `import hermes_cli` resolves to
+# THIS repo's engine, not a globally-installed hermes. Without this the test
+# silently imports ~/.hermes/hermes-agent (a different version, possibly with
+# its own production dashboard already bound on 9119) and becomes flaky.
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 sys.path.insert(0, str(Path(__file__).parent))
 import app_shell
 
@@ -24,19 +31,41 @@ def main() -> int:
     install.mkdir(parents=True)
     os.environ['HERMES_PORTABLE_INSTALL_DIR'] = str(install)
 
-    # Minimal web_dist so the SPA mount has something to serve.
+    # Minimal web_dist so the SPA mount has something to serve. mount_spa()
+    # requires an assets/ subdir to exist or it refuses to start.
     wd = install / 'hermes_cli' / 'web_dist'
-    wd.mkdir(parents=True)
+    (wd / 'assets').mkdir(parents=True)
     (wd / 'index.html').write_text(
         '<!doctype html><html><body><h1>Hermes E2E</h1></body></html>',
         encoding='utf-8')
+    (wd / 'assets' / 'placeholder.js').write_text('// placeholder\n',
+                                                  encoding='utf-8')
 
     # hermes-home so the engine has a HOME to write to.
     home = install / 'hermes-home'
     home.mkdir(exist_ok=True)
 
-    print(f'[e2e] install dir = {install}')
-    port = app_shell.ensure_selfhost()
+    # Pin a random isolated high port. The dev box runs a production hermes on
+    # 9119 and prior test processes can leave sockets in TIME_WAIT on 9120+/fixed
+    # ports, which would make find_free_port() pick a colliding port and make
+    # this test flaky (engine preflight then exits 75 = PORT_IN_USE).
+    import random
+    _test_port = str(random.randint(20000, 29999))
+    os.environ['HERMES_PORT'] = _test_port
+
+    print(f'[e2e] install dir = {install} (port {_test_port})')
+    try:
+        port = app_shell.ensure_selfhost()
+    except Exception:
+        import traceback
+        print('[e2e] ensure_selfhost failed — full traceback:')
+        if 'exc' in app_shell._SERVER_ERROR:
+            traceback.print_exception(
+                type(app_shell._SERVER_ERROR['exc']),
+                app_shell._SERVER_ERROR['exc'],
+                app_shell._SERVER_ERROR['exc'].__traceback__)
+        traceback.print_exc()
+        raise
     url = app_shell.dashboard_url(port)
     print(f'[e2e] server ready on port {port} -> {url}')
 

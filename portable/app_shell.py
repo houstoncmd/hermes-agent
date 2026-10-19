@@ -143,13 +143,29 @@ def dashboard_url(port: int) -> str:
 
 
 def port_responds(port: int) -> bool:
+    """True only if the HERMES dashboard is actually serving on this port.
+
+    Two critical fixes for locked-down (bank) machines:
+
+    1. BYPASS the system/PAC proxy. ``urllib.request.urlopen`` respects the
+       Windows system proxy, and bank machines route even ``127.0.0.1``
+       through a corporate proxy. The proxy answers with an HTTP error for
+       localhost — the old code caught ``HTTPError`` and returned True (a
+       false positive), so ``ensure_selfhost()`` returned a port WITHOUT
+       starting our server, and the browser then hit "connection refused".
+
+    2. VERIFY the ``/api/health`` sentinel instead of accepting ANY HTTP
+       response. A stray service (or the proxy itself) must not be mistaken
+       for our dashboard.
+    """
     import urllib.request
-    import urllib.error
+
+    # ProxyHandler({}) forces a DIRECT connection, ignoring system/PAC proxy.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        urllib.request.urlopen(dashboard_url(port) + '/', timeout=2)
-        return True
-    except urllib.error.HTTPError:
-        return True   # any HTTP response = server is up (auth redirects etc.)
+        with opener.open(dashboard_url(port) + '/api/health', timeout=2) as r:
+            body = r.read(512).decode('utf-8', 'replace')
+            return '"ok"' in body   # hermes /api/health sentinel
     except Exception:
         return False
 
@@ -195,7 +211,7 @@ def start_selfhost_server(port: int) -> None:
 
 # In-process dashboard server state (self-hosting).
 _SERVER_ERROR: dict = {}
-_SERVER_THREAD: dict = {'thread': None}
+_SERVER_THREAD: dict = {'thread': None, 'port': 0}
 
 
 # ─── First-run installer ───────────────────────────────────────────────────
@@ -207,11 +223,18 @@ def ensure_selfhost() -> int:
     Unlike the old spawn_backend() this does NOT exec a subprocess: the server
     runs on a daemon thread inside THIS process. Faster, no port race, no
     stale pidfile — and shutdown is a plain os._exit(0).
+
+    We ALWAYS start our own server on a free port — we never "attach" to a
+    pre-existing hermes on the probe ports. On a dev box the probe ports may
+    hold a DIFFERENT hermes (e.g. the host's own production dashboard), and
+    silently reusing it would make the portable shell talk to the wrong
+    backend. find_free_port() skips occupied ports, so we bind our own.
+
+    Memoized per-process: a second call returns the already-started port
+    instead of spawning a duplicate server thread.
     """
-    # Already serving? (another shell instance already bound the port)
-    for port in _port_candidates():
-        if port_responds(port):
-            return port
+    if _SERVER_THREAD.get('port'):
+        return _SERVER_THREAD['port']
 
     port = find_free_port()
 
@@ -221,6 +244,8 @@ def ensure_selfhost() -> int:
         except BaseException as exc:  # noqa: BLE001 — surface to GUI thread
             _SERVER_ERROR['exc'] = exc
 
+    _SERVER_ERROR.clear()
+    _SERVER_THREAD['port'] = port
     t = threading.Thread(target=_run, name='hermes-dashboard', daemon=True)
     _SERVER_THREAD['thread'] = t
     t.start()
@@ -236,8 +261,8 @@ def ensure_selfhost() -> int:
         time.sleep(0.5)
 
     raise RuntimeError(
-        f'Dashboard did not become ready within {BACKEND_READY_TIMEOUT}s — '
-        f'check {log_file()}'
+        f'Dashboard did not become ready within {BACKEND_READY_TIMEOUT}s on '
+        f'port {port} — check {log_file()}'
     )
 
 
