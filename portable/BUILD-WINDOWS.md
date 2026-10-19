@@ -40,15 +40,18 @@ pip install pyinstaller pywebview pystray pillow
 `hermes.exe` ต้องมี `hermes_cli/web_dist` (ไฟล์ dashboard) ถ้าไม่มี UI จะ 404:
 
 ```powershell
-# ถ้า hermes_cli\web_dist ยังไม่มี ให้ build จาก web/
-if (-not (Test-Path hermes_cli\web_dist)) {
-    cd web
-    npm ci
-    npm run build        # output ไปที่ ..\hermes_cli\web_dist
-    cd ..
+# IMPORTANT: repo นี้เป็น npm workspace monorepo — package-lock.json และ
+# toolchain (tsc/vite) อยู่ที่ ROOT และถูก hoist ไปที่ root\\node_modules\\.bin
+# ห้าม cd web แล้ว npm ci (จะไม่เจอ tsc) ให้รันที่ ROOT แบบนี้:
+if (-not (Test-Path hermes_cli\\web_dist)) {
+    npm ci --include=dev --workspace web --include-workspace-root
+    npm run build --workspace web   # output ไปที่ hermes_cli\\web_dist
 }
 ```
 
+> ถ้า `npm ci` fail (lockfile drift บน fork/WIP) ให้ใช้
+> `npm install --no-save --include=dev --workspace web --include-workspace-root`
+> แล้วค่อย `npm run build --workspace web`
 > ถ้าข้ามขั้นตอนนี้ ตัว dashboard จะพยายาม build เองตอนรันครั้งแรก
 > (ต้องมี Node) หรือไม่ก็แสดง 404 — แนะนำอย่าข้าม
 

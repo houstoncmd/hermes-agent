@@ -56,10 +56,18 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path hermes_cli/web_dist)) {
-            Push-Location web
-            npm ci
-            npm run build
-            Pop-Location
+            # This is an npm workspace monorepo: package-lock.json and the
+            # tsc/vite toolchain live at the ROOT and get hoisted to
+            # root/node_modules/.bin. Running `npm ci` inside web/ installs
+            # nothing and leaves `tsc` unresolvable. Mirror hermes' own
+            # _build_web_ui: install the web workspace (with dev toolchain)
+            # from the root, then build via the workspace script.
+            npm ci --include=dev --workspace web --include-workspace-root
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "npm ci failed (lockfile drift?) — falling back to npm install"
+              npm install --no-save --include=dev --workspace web --include-workspace-root
+            }
+            npm run build --workspace web
           } else {
             Write-Host "hermes_cli/web_dist already present — skipping web build"
           }
