@@ -203,11 +203,28 @@ wheels_dir = REPO_ROOT / 'portable' / 'wheels'
 if wheels_dir.exists():
     datas.append((str(wheels_dir), 'bundled_wheels'))
 
+# pywebview (import name 'webview') + pystray ship submodules/data that static
+# analysis cannot follow (dynamic platform backends). Collect BEFORE Analysis
+# and feed the results into the CORRECT Analysis params. collect_all returns
+# (datas, binaries, hiddenimports) — appending datas (2-tuples) into a.pure
+# (needs 3-tuples) crashes PYZ with "not enough values to unpack".
+from PyInstaller.utils.hooks import collect_all as _collect_all
+
+_gui_binaries = []
+for _pkg in ('webview', 'pystray'):
+    try:
+        _c_datas, _c_binaries, _c_hidden = _collect_all(_pkg)
+        datas += _c_datas
+        _gui_binaries += _c_binaries
+        hidden_imports += _c_hidden
+    except Exception:
+        pass
+
 # ─── Analysis ──────────────────────────────────────────────────────────────
 a = Analysis(
     [str(REPO_ROOT / 'portable' / 'app_shell.py')],
     pathex=[str(REPO_ROOT)],
-    binaries=[],
+    binaries=_gui_binaries,
     datas=datas,
     hiddenimports=hidden_imports,
     hookspath=[],
@@ -241,19 +258,6 @@ a = Analysis(
     noarchive=False,
     optimize=1,  # -O1 for smaller size
 )
-
-# pywebview + pystray ship data/submodules PyInstaller cannot follow —
-# collect after Analysis so a.pure / a.binaries exist.
-from PyInstaller.utils.hooks import collect_all as _collect_all
-
-for _pkg in ('pywebview', 'webview', 'pystray'):
-    try:
-        _m, _p, _b = _collect_all(_pkg)
-        a.pure += _m
-        a.binaries += _b
-        datas += _p
-    except Exception:
-        pass
 
 # ─── PYZ (compressed Python archive) ──────────────────────────────────────
 pyz = PYZ(a.pure, a.zipped_data)
