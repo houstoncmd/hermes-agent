@@ -54,6 +54,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e .
           pip install pyinstaller pywebview pystray pillow
+          # Qt window backend (Electron-like): bundles its own Chromium so the
+          # native window works even with no WebView2 runtime on bank machines.
+          pip install PySide6
 
       - name: Build web UI (dashboard assets)
         shell: pwsh

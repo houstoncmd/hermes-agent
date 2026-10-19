@@ -147,6 +147,16 @@ core_hidden = [
     'pystray',
     'pystray._win32',
     'PIL',
+    # Qt window backend (Electron-like: bundles its own Chromium, so the native
+    # window works even with no WebView2 runtime on locked-down machines).
+    'qt_window',
+    'PySide6',
+    'PySide6.QtCore',
+    'PySide6.QtGui',
+    'PySide6.QtWidgets',
+    'PySide6.QtWebEngineWidgets',
+    'PySide6.QtWebEngineCore',
+    'PySide6.QtNetwork',
     # SQLite (used by hermes_state)
     'sqlite3',
     # Windows-specific
@@ -216,7 +226,10 @@ _gui_binaries = []
 # their runtime DLLs/data without collect_all ("Failed to resolve
 # Python.Runtime.Loader.Initialize"). Best-effort; app also has a browser
 # fallback if the native window still fails.
-for _pkg in ('webview', 'pystray', 'pythonnet', 'clr_loader'):
+for _pkg in ('webview', 'pystray', 'pythonnet', 'clr_loader',
+             'PySide6', 'PySide6.QtWebEngineWidgets', 'PySide6.QtWebEngineCore',
+             'PySide6.QtNetwork', 'PySide6.QtGui', 'PySide6.QtWidgets',
+             'PySide6.QtCore'):
     try:
         _c_datas, _c_binaries, _c_hidden = _collect_all(_pkg)
         datas += _c_datas

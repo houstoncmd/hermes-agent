@@ -639,6 +639,35 @@ def _browser_fallback(exc: Exception) -> None:
 def run_gui() -> None:
     STATE.installing = not is_installed()
 
+    # ── Primary: Qt/QWebEngineView (Electron-like) ─────────────────────────
+    # Bundles its OWN Chromium in the exe, so the native window works even on
+    # machines with no WebView2 runtime (the usual failure on bank endpoints).
+    # Also launches Chromium with --no-proxy-server so the embedded view can
+    # reach 127.0.0.1 on proxy-only networks. pywebview / browser are fallbacks.
+    try:
+        import qt_window
+
+        if qt_window.qt_available():
+            def _qt_install_and_start(progress):
+                if STATE.installing:
+                    run_first_install(progress)
+                progress('กำลังเริ่มต้น dashboard ...')
+                port = ensure_selfhost()
+                STATE.port = port
+                return port
+
+            qt_window.run_qt_gui(
+                app_name=APP_NAME,
+                loading_html=LOADING_HTML,
+                shutdown_word=SHUTDOWN_WORD,
+                install_and_start=_qt_install_and_start,
+                on_shutdown=do_shutdown,
+                progress=gui_progress,
+            )
+            return   # Qt ran the event loop to completion
+    except Exception as qt_exc:
+        print(f'[hermes] Qt window unavailable ({qt_exc}); trying pywebview')
+
     try:
         import webview
 
