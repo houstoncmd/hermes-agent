@@ -1,0 +1,84 @@
+name: Portable Windows Build
+
+# Builds the self-installing GUI hermes.exe on a real Windows runner and
+# publishes the distributable zip as a downloadable artifact — so users get a
+# ready-to-run binary without a local Python/PyInstaller toolchain.
+#
+# Trigger:
+#   - workflow_dispatch (manual, from the Actions tab) → download the zip
+#     from the run's Artifacts section.
+#   - push to this branch touching portable/** (keeps the artifact fresh).
+#
+# NOT wired into ci.yml: this is a packaging lane, not a merge gate.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/portable-build
+    paths:
+      - 'portable/**'
+      - '.github/workflows/portable-win.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-win-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build portable exe (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install Python deps (engine + build + GUI shell)
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller pywebview pystray pillow
+
+      - name: Build web UI (dashboard assets)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path hermes_cli/web_dist)) {
+            Push-Location web
+            npm ci
+            npm run build
+            Pop-Location
+          } else {
+            Write-Host "hermes_cli/web_dist already present — skipping web build"
+          }
+
+      - name: Run portable build
+        shell: pwsh
+        run: python portable/build.py --no-cleanup
+
+      - name: Collect dist output
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item dist/*.zip out/ -ErrorAction SilentlyContinue
+          Get-ChildItem out
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: hermes-portable-win64
+          path: out/*.zip
+          if-no-files-found: error
+          retention-days: 14
