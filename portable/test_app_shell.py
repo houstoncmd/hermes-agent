@@ -61,7 +61,9 @@ check('progress messages emitted', len(msgs) >= 3, f'{len(msgs)} msgs')
 
 # 4. Port probing
 p = A.find_free_port()
-check('find_free_port in range', isinstance(p, int) and 9119 <= p < 9129, str(p))
+# find_free_port now tries port 80 first (locked-down machines allow only
+# 80/443), then falls back to the 9119-9128 range. Accept either.
+check('find_free_port valid', isinstance(p, int) and (p == 80 or 9119 <= p < 9129), str(p))
 check('port_responds False (dead port)', not A.port_responds(p))
 
 # 5. Shutdown contract

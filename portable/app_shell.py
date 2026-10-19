@@ -109,8 +109,23 @@ def is_installed() -> bool:
 
 # ─── Backend process management ────────────────────────────────────────────
 
+def _port_candidates() -> list:
+    """Ports to try, in order. Port 80 first — some locked-down (bank) machines
+    only allow 80/443, and on Windows a raw Winsock bind to 127.0.0.1:80 does
+    NOT need admin (the <1024 restriction is a Unix rule; Windows only reserves
+    low ports via http.sys/IIS). Skip 443 (implies TLS). HERMES_PORT env
+    overrides everything."""
+    env = os.environ.get('HERMES_PORT')
+    if env:
+        try:
+            return [int(env)]
+        except ValueError:
+            pass
+    return [80] + list(range(BASE_PORT, BASE_PORT + PORT_PROBE_RANGE))
+
+
 def find_free_port() -> int:
-    for port in range(BASE_PORT, BASE_PORT + PORT_PROBE_RANGE):
+    for port in _port_candidates():
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(0.3)
             try:
@@ -121,11 +136,18 @@ def find_free_port() -> int:
     return BASE_PORT
 
 
+def dashboard_url(port: int) -> str:
+    """URL for the dashboard. Omit :80 (default http port) so the link is clean."""
+    if port == 80:
+        return 'http://127.0.0.1'
+    return f'http://127.0.0.1:{port}'
+
+
 def port_responds(port: int) -> bool:
     import urllib.request
     import urllib.error
     try:
-        urllib.request.urlopen(f'http://127.0.0.1:{port}/', timeout=2)
+        urllib.request.urlopen(dashboard_url(port) + '/', timeout=2)
         return True
     except urllib.error.HTTPError:
         return True   # any HTTP response = server is up (auth redirects etc.)
@@ -222,7 +244,7 @@ def ensure_backend() -> int:
         pass
 
     # Already serving? (started by another instance)
-    for port in range(BASE_PORT, BASE_PORT + PORT_PROBE_RANGE):
+    for port in _port_candidates():
         if port_responds(port):
             return port
 
@@ -621,7 +643,7 @@ def _browser_fallback(exc: Exception) -> None:
             run_first_install(lambda m: None)
         STATE.port = ensure_backend()
         start_tray()
-        webbrowser.open(f'http://127.0.0.1:{STATE.port}')
+        webbrowser.open(dashboard_url(STATE.port))
         # Keep the process alive so the tray + backend stay up.
         while True:
             time.sleep(3600)
@@ -678,7 +700,7 @@ def run_gui() -> None:
             try:
                 STATE.port = _install_and_start_backend(gui_progress)
                 gui_progress('กำลังเปิด dashboard ...')
-                STATE.window.load_url(f'http://127.0.0.1:{STATE.port}')
+                STATE.window.load_url(dashboard_url(STATE.port))
                 start_tray()
             except Exception as exc:
                 try:
