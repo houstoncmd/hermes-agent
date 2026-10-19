@@ -620,7 +620,6 @@ def run_gui() -> None:
         width=430, height=290,
         resizable=False,
         frameless=False,
-        easy_api=False,
         js_api=ShellApi(),
         hidden=True,
         on_top=True,
