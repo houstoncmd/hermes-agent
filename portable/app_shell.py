@@ -271,9 +271,20 @@ def extract_payload(dest: Path, progress) -> bool:
 
 
 def copy_engine_exe(dest: Path, progress) -> Path:
-    """Copy the running exe into the install dir (idempotent)."""
-    target = dest / engine_exe_name()
+    """Copy the running exe (and its `_internal\` folder in onedir mode)
+    into the install dir. Idempotent — skips if already in place."""
     src = original_exe()
+    target = dest / engine_exe_name()
+
+    # Onedir mode: the exe needs its `_internal\` sibling (all DLLs + PYZ).
+    # Without it the exe won't start at all.
+    src_internal = src.parent / '_internal'
+    if src_internal.is_dir():
+        tgt_internal = dest / '_internal'
+        if not tgt_internal.exists():
+            progress('กำลังคัดลอก runtime (onedir) ...')
+            shutil.copytree(src_internal, tgt_internal, dirs_exist_ok=True)
+
     if src.resolve() == target.resolve() or not src.exists():
         return target
     progress('กำลังคัดลอก engine ...')

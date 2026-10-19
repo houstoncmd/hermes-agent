@@ -153,13 +153,16 @@ def build_exe():
         print("─── end stderr ───")
         return False
 
-    exe_path = DIST_DIR / 'hermes.exe'
-    if exe_path.exists():
-        size_mb = exe_path.stat().st_size / 1024 / 1024
-        print_success(f"Built: {exe_path} ({size_mb:.1f} MB)")
+    # onedir mode: PyInstaller emits dist\hermes\ (exe + _internal\ folder)
+    exe_path = DIST_DIR / 'hermes' / 'hermes.exe'
+    internal_dir = DIST_DIR / 'hermes' / '_internal'
+    if exe_path.exists() and internal_dir.is_dir():
+        exe_mb = exe_path.stat().st_size / 1024 / 1024
+        int_mb = sum(f.stat().st_size for f in internal_dir.rglob('*') if f.is_file()) / 1024 / 1024
+        print_success(f"Built (onedir): {exe_path} ({exe_mb:.1f} MB exe + {int_mb:.1f} MB _internal)")
         return True
     else:
-        print_error("exe not found after build")
+        print_error("onedir output (dist/hermes/) not found after build")
         return False
 
 
@@ -185,12 +188,17 @@ def create_distributable():
     # Collect files to include
     files_to_include = []
 
-    exe_path = DIST_DIR / 'hermes.exe'
-    if exe_path.exists():
-        files_to_include.append(('hermes.exe', exe_path))
-        print_success(f"  ✓ hermes.exe ({exe_path.stat().st_size / 1024 / 1024:.1f} MB)")
+    # Onedir: add the whole dist\hermes\ folder (exe + _internal\) recursively
+    onedir_root = DIST_DIR / 'hermes'
+    if onedir_root.is_dir():
+        total_mb = sum(f.stat().st_size for f in onedir_root.rglob('*') if f.is_file()) / 1024 / 1024
+        for f in sorted(onedir_root.rglob('*')):
+            if f.is_file():
+                rel = f.relative_to(onedir_root)
+                files_to_include.append((f'hermes/{rel.as_posix()}', f))
+        print_success(f"  ✓ hermes/ (onedir bundle, {total_mb:.1f} MB total)")
     else:
-        print(f"  ⚠  hermes.exe not found (build on Windows to create it)")
+        print(f"  ⚠  dist/hermes/ not found (build on Windows to create it)")
 
     # Find payload zip
     payload_files = list(DIST_DIR.glob('hermes-payload-*.zip'))

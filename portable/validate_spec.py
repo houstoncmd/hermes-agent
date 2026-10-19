@@ -30,6 +30,11 @@ class FakeEXE:
         pass
 
 
+class FakeCOLLECT:
+    def __init__(self, *a, **k):
+        pass
+
+
 fake_hooks = types.ModuleType("PyInstaller.utils.hooks")
 fake_hooks.collect_all = lambda pkg: ([], [], [])
 fake_utils = types.ModuleType("PyInstaller.utils")
@@ -40,7 +45,8 @@ sys.modules['PyInstaller'] = fake_pi
 sys.modules['PyInstaller.utils'] = fake_utils
 sys.modules['PyInstaller.utils.hooks'] = fake_hooks
 
-g = {'Analysis': FakeAnalysis, 'PYZ': FakePYZ, 'EXE': FakeEXE, '__file__': str(spec_path)}
+g = {'Analysis': FakeAnalysis, 'PYZ': FakePYZ, 'EXE': FakeEXE,
+     'COLLECT': FakeCOLLECT, '__file__': str(spec_path)}
 
 try:
     exec(compile(src, str(spec_path), 'exec'), g)

@@ -262,23 +262,24 @@ a = Analysis(
 # ─── PYZ (compressed Python archive) ──────────────────────────────────────
 pyz = PYZ(a.pure, a.zipped_data)
 
-# ─── EXE ──────────────────────────────────────────────────────────────────
+# ─── EXE + COLLECT (onedir) ────────────────────────────────────────────────
+# Build as ONEDIR, not onefile. A onefile exe extracts its bundled DLLs to
+# %TEMP%\_MEIxxxx on EVERY launch; corporate antivirus (this app runs on bank
+# machines) hooks that temp extraction and blocks the OpenSSL DLLs, so
+# `import ssl` dies with "DLL load failed while importing _ssl: Invalid
+# access to memory location" (Win32 error 998). In onedir the DLLs sit in a
+# normal `_internal\` folder and load normally — no temp extraction, no AV
+# hook. Also much faster startup (no re-extract of an 88 MB payload each run).
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,   # keep binaries in _internal\, not inside the exe
     name='hermes',
     debug=False,
     bootloader_ignore_signals=False,
-    strip=True,         # Strip debug symbols
-    # DO NOT enable UPX: it corrupts the OpenSSL DLLs (_ssl.pyd,
-    # libssl-*.dll, libcrypto-*.dll) that pywebview's http module pulls in
-    # via `import ssl`, causing "DLL load failed while importing _ssl:
-    # Invalid access to memory location" at first double-click. Reliability
-    # over a ~10-20% size win — the exe is a few MB bigger but actually runs.
-    upx=False,
+    strip=False,        # stripping can break some Windows binaries
+    upx=False,          # UPX corrupts OpenSSL/pyd binaries — keep off
     console=False,      # GUI app (windowed); CLI re-attaches parent console
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -286,4 +287,14 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=None,          # Can add hermes.ico later
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='hermes',      # output folder: dist\hermes\ (exe + _internal\)
 )
