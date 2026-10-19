@@ -16,8 +16,12 @@ import sys
 import importlib
 from pathlib import Path
 
-SPEC_ROOT = Path(os.path.abspath(SPECBOX)).parent if '__file__' in dir() else Path('.')
-REPO_ROOT = Path(os.path.abspath(os.path.dirname(SPECBOX))) if '__file__' in dir() else Path('..')
+# PyInstaller execs this spec with SPECPATH set to the spec's directory
+# (portable/). The old code referenced an undefined SPECBOX, which raised
+# NameError the moment PyInstaller loaded the spec → the exe never built.
+_SPEC_DIR = Path(SPECPATH) if 'SPECPATH' in dir() else Path(__file__).resolve().parent
+SPEC_ROOT = _SPEC_DIR
+REPO_ROOT = _SPEC_DIR.parent   # portable/ sits directly under the repo root
 
 # ─── Collect all tool modules (auto-discovered) ───────────────────────────
 tools_dir = REPO_ROOT / 'tools'

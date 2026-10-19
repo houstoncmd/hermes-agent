@@ -144,7 +144,13 @@ def build_exe():
 
     if result.returncode != 0:
         print_error("PyInstaller build failed")
-        print(f"  {result.stderr[:500]}")
+        # Print the FULL tail of stderr — the real cause (spec error, missing
+        # module, hook crash) is at the END, and truncating to 500 chars hides
+        # it behind the INFO header. Keep the last 4000 chars.
+        tail = (result.stderr or "").strip()[-4000:]
+        print("─── PyInstaller stderr (tail) ───")
+        print(tail)
+        print("─── end stderr ───")
         return False
 
     exe_path = DIST_DIR / 'hermes.exe'
@@ -316,7 +322,9 @@ def main():
     # Build exe (Windows only)
     if not args.skip_exe:
         if sys.platform == 'win32':
-            build_exe()
+            if not build_exe():
+                print_error("exe build failed — aborting (no distributable without the engine)")
+                sys.exit(1)
         else:
             print_step("Skipping exe build (not on Windows)")
             print("  To build the exe, run this script on Windows")
